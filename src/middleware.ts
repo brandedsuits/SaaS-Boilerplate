@@ -23,30 +23,40 @@ const isProtectedRoute = createRouteMatcher([
   '/:locale/api(.*)',
 ]);
 
+const isPublicRoute = createRouteMatcher([
+  '/',
+  '/:locale',
+  '/sign-in(.*)',
+  '/:locale/sign-in(.*)',
+  '/sign-up(.*)',
+  '/:locale/sign-up(.*)',
+]);
+
 export default function middleware(
   request: NextRequest,
   event: NextFetchEvent,
 ) {
-  if (
-    request.nextUrl.pathname.includes('/sign-in')
-    || request.nextUrl.pathname.includes('/sign-up')
-    || isProtectedRoute(request)
-  ) {
-    return clerkMiddleware(async (auth, req) => {
-      if (isProtectedRoute(req)) {
-        const locale
-          = req.nextUrl.pathname.match(/(\/.*)\/dashboard/)?.at(1) ?? '';
+  // Handle internationalization first for all requests
+  if (isPublicRoute(request)) {
+    return intlMiddleware(request);
+  }
 
+  // For protected routes, use Clerk middleware with proper composition
+  return clerkMiddleware(
+    async (auth, req) => {
+      // Handle protected routes
+      if (isProtectedRoute(req)) {
+        const locale = req.nextUrl.pathname.match(/(\/.*)\/dashboard/)?.at(1) ?? '';
         const signInUrl = new URL(`${locale}/sign-in`, req.url);
 
         await auth.protect({
-          // `unauthenticatedUrl` is needed to avoid error: "Unable to find `next-intl` locale because the middleware didn't run on this request"
           unauthenticatedUrl: signInUrl.toString(),
         });
       }
 
       const authObj = await auth();
 
+      // Handle organization selection redirect
       if (
         authObj.userId
         && !authObj.orgId
@@ -61,11 +71,20 @@ export default function middleware(
         return NextResponse.redirect(orgSelection);
       }
 
+      // Apply internationalization middleware after auth processing
       return intlMiddleware(req);
-    })(request, event);
-  }
-
-  return intlMiddleware(request);
+    },
+    {
+      publicRoutes: [
+        '/',
+        '/:locale',
+        '/sign-in(.*)',
+        '/:locale/sign-in(.*)',
+        '/sign-up(.*)',
+        '/:locale/sign-up(.*)',
+      ],
+    },
+  )(request, event);
 }
 
 export const config = {
