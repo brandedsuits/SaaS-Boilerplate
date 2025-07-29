@@ -23,69 +23,49 @@ const isProtectedRoute = createRouteMatcher([
   '/:locale/api(.*)',
 ]);
 
-const isPublicRoute = createRouteMatcher([
-  '/',
-  '/:locale',
-  '/sign-in(.*)',
-  '/:locale/sign-in(.*)',
-  '/sign-up(.*)',
-  '/:locale/sign-up(.*)',
-]);
+export default clerkMiddleware(
+  async (auth, req) => {
+    // Handle protected routes
+    if (isProtectedRoute(req)) {
+      const locale = req.nextUrl.pathname.match(/(\/.*)\/dashboard/)?.at(1) ?? '';
+      const signInUrl = new URL(`${locale}/sign-in`, req.url);
 
-export default function middleware(
-  request: NextRequest,
-  event: NextFetchEvent,
-) {
-  // Handle internationalization first for all requests
-  if (isPublicRoute(request)) {
-    return intlMiddleware(request);
-  }
+      await auth.protect({
+        unauthenticatedUrl: signInUrl.toString(),
+      });
+    }
 
-  // For protected routes, use Clerk middleware with proper composition
-  return clerkMiddleware(
-    async (auth, req) => {
-      // Handle protected routes
-      if (isProtectedRoute(req)) {
-        const locale = req.nextUrl.pathname.match(/(\/.*)\/dashboard/)?.at(1) ?? '';
-        const signInUrl = new URL(`${locale}/sign-in`, req.url);
+    const authObj = await auth();
 
-        await auth.protect({
-          unauthenticatedUrl: signInUrl.toString(),
-        });
-      }
+    // Handle organization selection redirect
+    if (
+      authObj.userId
+      && !authObj.orgId
+      && req.nextUrl.pathname.includes('/dashboard')
+      && !req.nextUrl.pathname.endsWith('/organization-selection')
+    ) {
+      const orgSelection = new URL(
+        '/onboarding/organization-selection',
+        req.url,
+      );
 
-      const authObj = await auth();
+      return NextResponse.redirect(orgSelection);
+    }
 
-      // Handle organization selection redirect
-      if (
-        authObj.userId
-        && !authObj.orgId
-        && req.nextUrl.pathname.includes('/dashboard')
-        && !req.nextUrl.pathname.endsWith('/organization-selection')
-      ) {
-        const orgSelection = new URL(
-          '/onboarding/organization-selection',
-          req.url,
-        );
-
-        return NextResponse.redirect(orgSelection);
-      }
-
-      // Apply internationalization middleware after auth processing
-      return intlMiddleware(req);
-    },
-    {
-      publicRoutes: [
-        '/',
-        '/:locale',
-        '/sign-in(.*)',
-        '/:locale/sign-in(.*)',
-        '/sign-up(.*)',
-        '/:locale/sign-up(.*)',
-      ],
-    },
-  )(request, event);
-}
+    return NextResponse.next();
+  },
+  {
+    beforeAuth: intlMiddleware,
+    publicRoutes: [
+      '/',
+      '/:locale',
+      '/sign-in(.*)',
+      '/:locale/sign-in(.*)',
+      '/sign-up(.*)',
+      '/:locale/sign-up(.*)',
+    ],
+  },
+);
 
 export const config = {
   matcher: ['/((?!.+\\.[\\w]+$|_next|monitoring).*)', '/', '/(api|trpc)(.*)'], // Also exclude tunnelRoute used in Sentry from the matcher
